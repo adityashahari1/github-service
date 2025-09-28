@@ -133,7 +133,7 @@ def create_issue(request: Request, issue: CreateIssue, response: Response):
     }
 
 
-# 3) GET /issues, get issues by id 
+# 3) GET /issues, get issue by id 
 # Author: Aditya Shahari
 
 @app.get("/issues/{number}")
@@ -166,7 +166,7 @@ def get_issue(number: int):
     return gh.json()
 
 
-# 3) POST /issues, update issue by id 
+# 4) PATCH /issues, update issue by id 
 # Author: Aditya Shahari
 
 class UpdateIssue(BaseModel):
