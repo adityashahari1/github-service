@@ -1,9 +1,13 @@
+# Author: Aditya Shahari
+# Contributor(s):
+
 import os
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Response, Request
 from typing import Optional
 from pydantic import BaseModel
 import httpx
+from logger import logger
 
 load_dotenv()
 
@@ -11,15 +15,20 @@ app = FastAPI()
 
 @app.on_event("startup")
 def boot():
-    print("ENV_CHECK:", {
+    logger.info("ENV_CHECK: %s", {
         "GITHUB_OWNER": os.getenv("GITHUB_OWNER"),
         "GITHUB_REPO": os.getenv("GITHUB_REPO"),
-        "PORT": os.getenv("PORT")
+        "PORT": os.getenv("PORT"),
     })
 
 @app.get("/healthz")
 def healthz():
+    logger.info("Health check called")
     return {"status": "ok"}
+
+
+# 1) GET /issues, get list of issues
+# Author: Aditya Shahari
 
 @app.get("/issues")
 def list_issues(
@@ -29,7 +38,8 @@ def list_issues(
     per_page: int = 30,
     labels: Optional[str] = None,
 ):
-
+    logger.info("List issues called: state=%s, page=%s, per_page=%s, labels=%s",
+                state, page, per_page, labels)
     if state not in ("open", "closed", "all"):
         raise HTTPException(status_code=400, detail="state must be one of: open, closed, all")
     if page < 1:
@@ -66,6 +76,9 @@ def list_issues(
     return gh.json()
 
 
+# 2) POST /issues, create new issues
+# Author: Aditya Shahari
+
 class CreateIssue(BaseModel):
     title: str
     body: Optional[str] = None
@@ -73,6 +86,8 @@ class CreateIssue(BaseModel):
 
 @app.post("/issues", status_code=201)
 def create_issue(request: Request, issue: CreateIssue, response: Response):
+    logger.info("Create issue called: title=%s, labels=%s", issue.title, issue.labels)
+
     if not issue.title:
         raise HTTPException(status_code=400, detail="Title is required")
 
@@ -105,6 +120,7 @@ def create_issue(request: Request, issue: CreateIssue, response: Response):
 
     data = gh.json()
     response.headers["Location"] = f"/issues/{data.get('number')}"
+    logger.info("Issue created successfully: number=%s", data.get("number"))
     return {
         "number": data.get("number"),
         "html_url": data.get("html_url"),
@@ -116,14 +132,14 @@ def create_issue(request: Request, issue: CreateIssue, response: Response):
         "updated_at": data.get("updated_at"),
     }
 
-class UpdateIssue(BaseModel):
-    title: Optional[str] = None
-    body: Optional[str] = None
-    state: Optional[str] = None
 
+# 3) GET /issues, get issues by id 
+# Author: Aditya Shahari
 
 @app.get("/issues/{number}")
 def get_issue(number: int):
+    logger.info("Get issue called: number=%s", number)
+
     url = f"https://api.github.com/repos/{os.getenv('GITHUB_OWNER')}/{os.getenv('GITHUB_REPO')}/issues/{number}"
 
     headers = {
@@ -145,11 +161,23 @@ def get_issue(number: int):
     if gh.status_code >= 500:
         raise HTTPException(status_code=503, detail="GitHub server error")
 
+    logger.info("Get issue success: number=%s", number)
+
     return gh.json()
 
 
+# 3) POST /issues, update issue by id 
+# Author: Aditya Shahari
+
+class UpdateIssue(BaseModel):
+    title: Optional[str] = None
+    body: Optional[str] = None
+    state: Optional[str] = None
+
 @app.patch("/issues/{number}")
 def update_issue(number: int, update: UpdateIssue):
+    logger.info("Update issue called: number=%s, title=%s, state=%s",
+                number, update.title, update.state)
     url = f"https://api.github.com/repos/{os.getenv('GITHUB_OWNER')}/{os.getenv('GITHUB_REPO')}/issues/{number}"
 
     headers = {
@@ -182,5 +210,6 @@ def update_issue(number: int, update: UpdateIssue):
         raise HTTPException(status_code=400, detail="GitHub validation failed")
     if gh.status_code >= 500:
         raise HTTPException(status_code=503, detail="GitHub server error")
+    logger.info("Update issue success: number=%s", number)
 
     return gh.json()
