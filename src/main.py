@@ -1,8 +1,10 @@
 import os
 from dotenv import load_dotenv
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Response, Request
+from typing import Optional
+from pydantic import BaseModel
+import httpx
 
-# Load environment variables from .env
 load_dotenv()
 
 app = FastAPI()
@@ -18,4 +20,99 @@ def boot():
 @app.get("/healthz")
 def healthz():
     return {"status": "ok"}
+
+@app.get("/issues")
+def list_issues(
+    response: Response,
+    state: str = "open",
+    page: int = 1,
+    per_page: int = 30,
+    labels: Optional[str] = None,
+):
+
+    if state not in ("open", "closed", "all"):
+        raise HTTPException(status_code=400, detail="state must be one of: open, closed, all")
+    if page < 1:
+        raise HTTPException(status_code=400, detail="page must be >= 1")
+    if per_page < 1 or per_page > 100:
+        raise HTTPException(status_code=400, detail="per_page must be between 1 and 100")
+
+    url = f"https://api.github.com/repos/{os.getenv('GITHUB_OWNER')}/{os.getenv('GITHUB_REPO')}/issues"
+    params = {"state": state, "page": page, "per_page": per_page}
+    if labels:
+        params["labels"] = labels
+
+    headers = {
+        "Authorization": f"Bearer {os.getenv('GITHUB_TOKEN')}",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+
+    try:
+        with httpx.Client(timeout=10) as client:
+            gh = client.get(url, headers=headers, params=params)
+    except httpx.RequestError as e:
+        raise HTTPException(status_code=503, detail=f"github unreachable: {e}")
+
+    response.headers["Link"] = gh.headers.get("Link", "")
+
+    if gh.status_code in (401, 403):
+        raise HTTPException(status_code=401, detail="github auth failed or insufficient permissions")
+    if gh.status_code == 404:
+        raise HTTPException(status_code=404, detail="owner/repo not found or not accessible")
+    if gh.status_code >= 500:
+        raise HTTPException(status_code=503, detail="github server error")
+
+    return gh.json()
+
+
+class CreateIssue(BaseModel):
+    title: str
+    body: Optional[str] = None
+    labels: Optional[list[str]] = None
+
+@app.post("/issues", status_code=201)
+def create_issue(request: Request, issue: CreateIssue, response: Response):
+    if not issue.title:
+        raise HTTPException(status_code=400, detail="Title is required")
+
+    url = f"https://api.github.com/repos/{os.getenv('GITHUB_OWNER')}/{os.getenv('GITHUB_REPO')}/issues"
+
+    headers = {
+        "Authorization": f"Bearer {os.getenv('GITHUB_TOKEN')}",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+
+    payload = {
+        "title": issue.title,
+        "body": issue.body,
+        "labels": issue.labels,
+    }
+
+    try:
+        with httpx.Client(timeout=10) as client:
+            gh = client.post(url, headers=headers, json=payload)
+    except httpx.RequestError as e:
+        raise HTTPException(status_code=503, detail=f"github unreachable: {e}")
+
+    if gh.status_code == 401 or gh.status_code == 403:
+        raise HTTPException(status_code=401, detail="GitHub auth failed or no access.")
+    if gh.status_code == 422:
+        raise HTTPException(status_code=400, detail="GitHub validation failed")
+    if gh.status_code >= 500:
+        raise HTTPException(status_code=503, detail="GitHub server error")
+
+    data = gh.json()
+    response.headers["Location"] = f"/issues/{data.get('number')}"
+    return {
+        "number": data.get("number"),
+        "html_url": data.get("html_url"),
+        "state": data.get("state"),
+        "title": data.get("title"),
+        "body": data.get("body"),
+        "labels": [label["name"] for label in data.get("labels", [])],
+        "created_at": data.get("created_at"),
+        "updated_at": data.get("updated_at"),
+    }
 
