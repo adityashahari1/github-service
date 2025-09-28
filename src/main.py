@@ -116,3 +116,71 @@ def create_issue(request: Request, issue: CreateIssue, response: Response):
         "updated_at": data.get("updated_at"),
     }
 
+class UpdateIssue(BaseModel):
+    title: Optional[str] = None
+    body: Optional[str] = None
+    state: Optional[str] = None
+
+
+@app.get("/issues/{number}")
+def get_issue(number: int):
+    url = f"https://api.github.com/repos/{os.getenv('GITHUB_OWNER')}/{os.getenv('GITHUB_REPO')}/issues/{number}"
+
+    headers = {
+        "Authorization": f"Bearer {os.getenv('GITHUB_TOKEN')}",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+
+    try:
+        with httpx.Client(timeout=10) as client:
+            gh = client.get(url, headers=headers)
+    except httpx.RequestError as e:
+        raise HTTPException(status_code=503, detail=f"github unreachable: {e}")
+
+    if gh.status_code == 404:
+        raise HTTPException(status_code=404, detail="Issue not found")
+    if gh.status_code in (401, 403):
+        raise HTTPException(status_code=401, detail="GitHub auth failed or insufficient permissions")
+    if gh.status_code >= 500:
+        raise HTTPException(status_code=503, detail="GitHub server error")
+
+    return gh.json()
+
+
+@app.patch("/issues/{number}")
+def update_issue(number: int, update: UpdateIssue):
+    url = f"https://api.github.com/repos/{os.getenv('GITHUB_OWNER')}/{os.getenv('GITHUB_REPO')}/issues/{number}"
+
+    headers = {
+        "Authorization": f"Bearer {os.getenv('GITHUB_TOKEN')}",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+
+    payload = {}
+    if update.title is not None:
+        payload["title"] = update.title
+    if update.body is not None:
+        payload["body"] = update.body
+    if update.state is not None:
+        if update.state not in ["open", "closed"]:
+            raise HTTPException(status_code=400, detail="state must be 'open' or 'closed'")
+        payload["state"] = update.state
+
+    try:
+        with httpx.Client(timeout=10) as client:
+            gh = client.patch(url, headers=headers, json=payload)
+    except httpx.RequestError as e:
+        raise HTTPException(status_code=503, detail=f"github unreachable: {e}")
+
+    if gh.status_code == 404:
+        raise HTTPException(status_code=404, detail="Issue not found")
+    if gh.status_code in (401, 403):
+        raise HTTPException(status_code=401, detail="GitHub auth failed or insufficient permissions")
+    if gh.status_code == 422:
+        raise HTTPException(status_code=400, detail="GitHub validation failed")
+    if gh.status_code >= 500:
+        raise HTTPException(status_code=503, detail="GitHub server error")
+
+    return gh.json()
