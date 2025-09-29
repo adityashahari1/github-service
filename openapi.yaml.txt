@@ -1,0 +1,299 @@
+openapi: 3.1.0
+info:
+  title: GitHub Issues Gateway API
+  version: "1.0.0"
+  description: >
+    API wrapping GitHub Issues REST API for a configured repo,
+    supporting CRUD and comments with webhook support.
+servers:
+  - url: http://localhost:{PORT}
+    variables:
+      PORT:
+        default: "8080"
+        description: Port the API listens on
+
+security:
+  - bearerAuth: []
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: PAT
+
+  schemas:
+    Issue:
+      type: object
+      properties:
+        number:
+          type: integer
+          example: 123
+        title:
+          type: string
+          example: Bug report
+        body:
+          type: string
+          example: Description of the bug
+        state:
+          type: string
+          enum: [open, closed]
+          example: open
+        labels:
+          type: array
+          items:
+            type: string
+          example: [bug, urgent]
+        html_url:
+          type: string
+          format: uri
+          example: https://github.com/owner/repo/issues/123
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    IssueCreateRequest:
+      type: object
+      required:
+        - title
+      properties:
+        title:
+          type: string
+          example: New issue title
+        body:
+          type: string
+          example: Issue description
+        labels:
+          type: array
+          items:
+            type: string
+          example: [bug]
+
+    IssueUpdateRequest:
+      type: object
+      properties:
+        title:
+          type: string
+          example: Updated title
+        body:
+          type: string
+          example: Updated body text
+        state:
+          type: string
+          enum: [open, closed]
+          example: closed
+
+    CommentCreateRequest:
+      type: object
+      required:
+        - body
+      properties:
+        body:
+          type: string
+          example: This is a comment text
+
+    Comment:
+      type: object
+      properties:
+        id:
+          type: integer
+        body:
+          type: string
+        user:
+          type: object
+          properties:
+            login:
+              type: string
+        created_at:
+          type: string
+          format: date-time
+        html_url:
+          type: string
+          format: uri
+
+    Error:
+      type: object
+      properties:
+        code:
+          type: integer
+          example: 400
+        message:
+          type: string
+          example: Invalid request
+        details:
+          type: string
+          nullable: true
+
+  responses:
+    Unauthorized:
+      description: Invalid or missing authentication
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+    BadRequest:
+      description: Invalid payload or request
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+paths:
+  /issues:
+    post:
+      summary: Create a new issue
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IssueCreateRequest'
+      responses:
+        '201':
+          description: Created issue
+          headers:
+            Location:
+              description: URL of created issue
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Issue'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+    get:
+      summary: List issues with filters and pagination
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: state
+          in: query
+          schema:
+            type: string
+            enum: [open, closed, all]
+            default: open
+        - name: labels
+          in: query
+          schema:
+            type: string
+            description: Comma separated labels
+        - name: page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+        - name: per_page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+      responses:
+        '200':
+          description: List of issues
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Issue'
+
+  /issues/{number}:
+    get:
+      summary: Get a single issue by number
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: number
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Issue details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Issue'
+        '404':
+          description: Issue not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+    patch:
+      summary: Update an issue
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: number
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IssueUpdateRequest'
+      responses:
+        '200':
+          description: Updated issue
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Issue'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          description: Issue not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /issues/{number}/comments:
+    post:
+      summary: Add comment to an issue
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: number
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CommentCreateRequest'
+      responses:
+        '201':
+          description: Created comment
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Comment'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          description: Issue not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'

@@ -18,7 +18,8 @@ from .utils.idempotency import idempotency
 load_dotenv()
 
 app = FastAPI(title="GitHub Issues Gateway", version="1.0.0")
-
+from .webhook import router as webhook_router
+app.include_router(webhook_router)
 @app.on_event("startup")
 def boot():
     logger.info("ENV_CHECK: %s", {
@@ -316,3 +317,6 @@ def get_events(limit: int = 50):
     if limit > 100:
         limit = 100
     return idempotency.get_recent_events(limit)
+@app.get("/")
+def read_root():
+    return {"message": "GitHub Issues Gateway API running. See /docs for API docs."}
